@@ -1,0 +1,39 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tool and test caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local settings, secrets, and logs
+.env
+.env.*
+!.env.example
+*.log
+logs/
+
+# Model caches and downloaded weights
+.cache/
+.huggingface/
+models/
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+data/
+
+# Generated benchmark outputs (keep checked-in fixtures/reports elsewhere)
+benchmarks/results/
+benchmark-results/
