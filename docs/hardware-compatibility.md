@@ -2,31 +2,69 @@
 
 ## Development target
 
-The core application and tests are CPU-first. They do not require CUDA, an
-accelerator, API credentials, or model downloads. The project metadata accepts
-Python 3.10 through 3.13; Python 3.11 is the recommended development version.
+The application and inference backend are CPU-first. The backend explicitly
+moves model parameters to CPU and does not initialize CUDA or claim ROCm/AMD GPU
+support. No NVIDIA GPU is required.
 
-The inspected development machine runs 64-bit Windows 11, has 15.3 GiB RAM,
-and reports AMD Radeon integrated graphics with 512 MiB of adapter memory.
-That adapter figure is not a reliable estimate of shared or usable graphics
-memory. No inference speed or GPU availability is inferred from it.
+The inspected development machine runs 64-bit Windows 11, has approximately
+16 GiB RAM, and reports AMD Radeon integrated graphics with approximately
+512 MiB of dedicated adapter memory. That adapter figure is not a reliable
+estimate of shared or usable graphics memory. Model loading and generation
+remain CPU-only.
 
-## Optional integrations
+## Transformers and PyTorch
 
-| Integration | Phase 2 status | Platform notes |
+The Phase 4 backend requires PyTorch and Transformers. On Windows, install a
+CPU PyTorch wheel only inside the project virtual environment, then install
+the Transformers extra:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.6,<3"
+.\.venv\Scripts\python.exe -m pip install -e ".[transformers,system-metrics]"
+.\.venv\Scripts\python.exe scripts\check_torch_environment.py
+```
+
+The `system-metrics` extra adds optional `psutil` sampling. Without it,
+process-memory and CPU-utilization measurements are reported as unavailable.
+Do not install CUDA or ROCm wheels for this Windows CPU path.
+
+| Component | Role | Hardware behavior |
 | --- | --- | --- |
-| Transformers and tokenizers | Not installed | Later CPU experiments may use a small model; model downloads are opt-in. |
-| PyTorch | Not installed | Install a wheel compatible with the selected Python and platform when needed. No CUDA variant is assumed. |
-| JAX | Not installed | CPU is available on Windows x86_64, but its Windows wheel is documented as experimental. AMD GPU support is not available on native Windows in the current JAX platform matrix. |
-| llama.cpp | Not installed | `llama-cpp-python` may require a compatible wheel or a local compiler toolchain on Windows; use a compatible GGUF model only. |
-| vLLM | Not installed | Optional Linux deployment integration; hardware, driver, and Python support must be checked against its current installation guide. |
-| SGLang | Not installed | Optional Linux deployment integration; hardware, driver, and Python support must be checked against its current installation guide. |
+| PyTorch | Tensor execution and model generation | Explicitly executes on CPU |
+| Transformers | Model/tokenizer loading and autoregressive generation | Uses the selected model's tokenizer |
+| `sshleifer/tiny-gpt2` | Small educational first model | Not intended for production-quality answers |
 
-The vLLM and SGLang extras are guarded to Linux and Python below 3.13. Their
-dependency declarations do not establish that a given accelerator or driver
-combination is supported. WSL does not automatically make AMD GPU support
-available to every framework.
+Model downloads are opt-in. The default configuration is offline/cache-only,
+model weights are not loaded during app startup, and the backend allows one
+loaded model at a time. The configured maximum generation length defaults to
+256 tokens and can be lowered through `LLM_LAB_INFERENCE_MAX_NEW_TOKENS`.
+Unload the model when finished to release references. Operating-system memory
+pressure can still occur; generation/load out-of-memory errors are surfaced
+without silently switching models or devices.
 
-The initial `/system/info` endpoint reports the OS, Python version, and CPU
-count. It leaves memory and GPU inventory unset because Phase 2 does not add a
-hardware-detection dependency or platform-specific probe.
+## Measurement limitations
+
+Model/tokenizer loading time is reported separately from prompt tokenization
+and generation. The generation duration covers the `model.generate()` call.
+TTFT is currently unavailable because the backend does not instrument the
+first token event. Optional process RSS sampling includes the Python process
+and loaded model; it is not incremental model memory or GPU VRAM.
+
+Automated tests use mocks and do not load model weights. A real benchmark
+requires an explicit model download or an existing compatible local cache and
+an explicit run. CPU timing depends on the processor, memory pressure, runtime
+versions, and other running processes; results should be compared only under
+matching model, prompt, generation, and environment settings.
+
+## Other optional integrations
+
+| Integration | Status and platform notes |
+| --- | --- |
+| JAX | Optional numerical experiments; the Windows x86_64 wheel is documented as experimental. Native AMD GPU support is not available on Windows in JAX's current platform matrix. |
+| `llama-cpp-python` | Optional; a compatible Windows wheel or local compiler toolchain may be needed. Use a compatible GGUF model. |
+| vLLM | Optional Linux deployment integration; verify current Python, driver, and accelerator requirements. |
+| SGLang | Optional Linux deployment integration; verify current Python, driver, and accelerator requirements. |
+
+WSL does not automatically make AMD GPU support available to every framework.
+The application reports backend availability based on installed dependencies
+and runtime checks rather than assuming an accelerator is usable.

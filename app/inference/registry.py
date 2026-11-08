@@ -21,6 +21,10 @@ class BackendRegistry:
             raise ValueError(f"Backend {name!r} is already registered.")
         self._backends[name] = backend
 
+    def get_backend(self, name: str) -> InferenceBackend | None:
+        """Return a registered adapter by name, if present."""
+        return self._backends.get(name)
+
     def list_backends(self) -> list[BackendInfo]:
         """Return current availability, checking optional imports before adapters."""
         results: list[BackendInfo] = []

@@ -27,14 +27,18 @@ dev = [
     "ruff>=0.6,<1",
 ]
 transformers = [
-    "transformers>=4.45,<5",
-    "tokenizers>=0.20,<1",
+    "transformers>=4.57,<6",
+    "tokenizers>=0.22,<1",
+    "safetensors>=0.4,<1",
 ]
 datasets = [
     "datasets>=3.0,<5",
 ]
 pytorch = [
-    "torch>=2.2,<3",
+    "torch>=2.6,<3",
+]
+system-metrics = [
+    "psutil>=5.9,<8",
 ]
 jax = [
     "jax>=0.4.30,<1",

@@ -68,7 +68,7 @@ class InferenceRequest(StrictSchema):
     model_name: str = Field(min_length=1, max_length=256)
     backend_name: str = Field(min_length=1, max_length=64)
     prompt: str = Field(min_length=1)
-    max_new_tokens: int = Field(default=128, ge=1, le=8192)
+    max_new_tokens: int = Field(default=128, ge=1, le=512)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     top_k: int | None = Field(default=None, ge=1)
 
@@ -83,6 +83,12 @@ class InferenceResponse(StrictSchema):
     time_per_output_token_ms: float | None = Field(default=None, ge=0)
     output_tokens_per_second: float | None = Field(default=None, ge=0)
     peak_memory_bytes: int | None = Field(default=None, ge=0)
+    input_token_count: int | None = Field(default=None, ge=0)
+    total_sequence_length: int | None = Field(default=None, ge=0)
+    tokenization_latency_ms: float | None = Field(default=None, ge=0)
+    cpu_utilization_percent: float | None = Field(default=None, ge=0)
+    tokenizer_name: str | None = None
+    device: str | None = None
 
 
 class BenchmarkConfig(StrictSchema):

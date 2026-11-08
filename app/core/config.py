@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     benchmark_output_dir: Path = Path("benchmarks/results")
     data_dir: Path = Path("data")
     dataset_max_samples: int = 5000
+    inference_model_id: str = "sshleifer/tiny-gpt2"
+    inference_offline_mode: bool = True
+    inference_max_new_tokens: int = 256
 
     @field_validator("model_cache_dir", "benchmark_output_dir", "data_dir", mode="before")
     @classmethod
@@ -39,6 +42,20 @@ class Settings(BaseSettings):
     def validate_dataset_max_samples(cls, value: int) -> int:
         if value < 1:
             raise ValueError("dataset_max_samples must be at least 1.")
+        return value
+
+    @field_validator("inference_max_new_tokens")
+    @classmethod
+    def validate_inference_max_new_tokens(cls, value: int) -> int:
+        if not 1 <= value <= 1024:
+            raise ValueError("inference_max_new_tokens must be between 1 and 1024.")
+        return value
+
+    @field_validator("inference_model_id")
+    @classmethod
+    def validate_inference_model_id(cls, value: str) -> str:
+        if not value.strip() or len(value) > 256:
+            raise ValueError("inference_model_id must be 1 to 256 characters.")
         return value
 
     @model_validator(mode="after")

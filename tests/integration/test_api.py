@@ -1,14 +1,19 @@
 """Integration tests for the initial FastAPI surfaces."""
 
+import sys
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+from app.core.config import Settings
 from app.core.exceptions import ApplicationError
 from app.core.schemas import (
     BackendCapabilities,
     InferenceRequest,
     InferenceResponse,
 )
+from app.inference.backends.transformers_backend import TransformersBackend
 from app.inference.base import InferenceBackend
 from app.inference.registry import BackendRegistry
 from app.main import create_app
@@ -202,3 +207,124 @@ def test_dataset_api_errors_are_structured_and_do_not_accept_paths(tmp_path) -> 
     assert unknown.status_code in {404, 405}
     assert not_loaded.status_code == 409
     assert not_loaded.json()["error"]["code"] == "dataset_not_loaded"
+
+
+def test_model_lifecycle_generate_and_actual_tokenizer_api(
+    tmp_path, monkeypatch, fake_inference_components
+) -> None:
+    torch, _, _, tokenizer_loader, model_loader, calls = fake_inference_components
+    settings = Settings(
+        _env_file=None,
+        model_cache_dir=tmp_path / "models",
+        data_dir=tmp_path / "data",
+        benchmark_output_dir=tmp_path / "benchmarks",
+        inference_max_new_tokens=8,
+    )
+    backend = TransformersBackend(
+        settings,
+        torch_module=torch,
+        tokenizer_loader=tokenizer_loader,
+        model_loader=model_loader,
+    )
+    client = TestClient(create_app(inference_backend=backend))
+
+    before = client.get("/inference/status")
+    not_loaded = client.post(
+        "/inference/generate",
+        json={"prompt": "not loaded", "max_new_tokens": 2},
+    )
+    loaded = client.post(
+        "/inference/load",
+        json={
+            "model_id": "sshleifer/tiny-gpt2",
+            "allow_download": True,
+        },
+    )
+    generated = client.post(
+        "/inference/generate",
+        json={"prompt": "small prompt", "max_new_tokens": 2, "seed": 3},
+    )
+    tokenized = client.post(
+        "/inference/tokenize",
+        json={"text": "small prompt"},
+    )
+    unloaded = client.post("/inference/unload")
+
+    assert before.status_code == 200
+    assert before.json()["configured_model_id"] == "sshleifer/tiny-gpt2"
+    assert before.json()["ready"] is False
+    assert not_loaded.status_code == 409
+    assert not_loaded.json()["error"]["code"] == "model_not_loaded"
+    assert loaded.status_code == 200
+    assert loaded.json()["status"]["ready"] is True
+    assert calls["tokenizer"][0][1]["local_files_only"] is True
+    assert generated.status_code == 200
+    assert generated.json()["input_token_count"] == 2
+    assert generated.json()["output_token_count"] == 2
+    assert generated.json()["time_to_first_token_ms"] is None
+    assert tokenized.status_code == 200
+    assert tokenized.json()["tokenizer_name"] == "transformers:sshleifer/tiny-gpt2"
+    assert tokenized.json()["token_count"] == 2
+    assert unloaded.status_code == 200
+    assert unloaded.json()["loaded"] is False
+
+
+def test_inference_benchmark_api_requires_loaded_model_and_dataset(
+    tmp_path, fake_inference_components, monkeypatch
+) -> None:
+    torch, _, _, tokenizer_loader, model_loader, _ = fake_inference_components
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(__version__="mock-transformers"),
+    )
+    settings = Settings(
+        _env_file=None,
+        model_cache_dir=tmp_path / "models",
+        data_dir=tmp_path / "data",
+        benchmark_output_dir=tmp_path / "benchmarks",
+        inference_max_new_tokens=8,
+    )
+    backend = TransformersBackend(
+        settings,
+        torch_module=torch,
+        tokenizer_loader=tokenizer_loader,
+        model_loader=model_loader,
+    )
+    client = TestClient(create_app(inference_backend=backend))
+
+    no_model = client.post(
+        "/benchmarks/run",
+        json={"dataset_name": "synthetic-benchmark", "max_new_tokens": 2},
+    )
+    client.post("/inference/load", json={})
+    no_dataset = client.post(
+        "/benchmarks/run",
+        json={"dataset_name": "synthetic-benchmark", "max_new_tokens": 2},
+    )
+    client.post(
+        "/datasets/synthetic-benchmark/load",
+        json={"limit": 2},
+    )
+    result = client.post(
+        "/benchmarks/run",
+        json={
+            "dataset_name": "synthetic-benchmark",
+            "categories": ["short_prompts"],
+            "max_samples": 1,
+            "max_new_tokens": 2,
+            "repetitions": 1,
+            "warmup_iterations": 0,
+            "seed": 42,
+        },
+    )
+    results = client.get("/benchmarks/results")
+
+    assert no_model.status_code == 409
+    assert no_dataset.status_code == 409, no_dataset.text
+    assert result.status_code == 200, result.text
+    assert result.json()["measured_requests"] == 1
+    assert result.json()["warmup_runs_excluded"] is True
+    assert results.status_code == 200
+    assert results.json()[0]["run_id"] == result.json()["run_id"]

@@ -1,16 +1,47 @@
-# LLM Inference & Performance Benchmarking Lab
+# LLM Inference Performance Lab
 
-A CPU-first engineering project for exploring tokenization, transformer execution,
-inference backends, numerical behavior, and reproducible LLM performance
-measurements. It is designed as a benchmarking and learning platform, not as a
-chatbot.
+An engineering-focused platform for exploring, benchmarking, and understanding
+Large Language Model (LLM) inference performance and numerical computing.
 
-The project provides validated configuration and schemas, a deterministic
-offline benchmark corpus, local and optional external dataset loaders, a
-dependency-free tokenizer, reproducible benchmark-input manifests, backend
-discovery contracts, and a FastAPI surface. Model inference and benchmark
-execution are added incrementally; preparing inputs does not execute inference
-or produce performance results.
+Built with Python, PyTorch, Hugging Face Transformers, and FastAPI, this project
+investigates how model inference, floating-point precision, numerical
+stability, and hardware constraints influence machine learning performance.
+
+## Key features
+
+- **LLM inference:** Run real Hugging Face Transformer models on CPU.
+- **Performance benchmarking:** Measure inference latency, throughput, and
+  execution performance.
+- **Dataset and tokenization pipeline:** Prepare deterministic datasets and
+  tokenized benchmark inputs.
+- **Numerical precision analysis:** Compare float32, float64, float16, and
+  bfloat16 operations where supported.
+- **Matrix multiplication benchmarks:** Evaluate tensor operations across data
+  types and dimensions.
+- **Numerical stability:** Explore floating-point accumulation, cancellation,
+  overflow, underflow, and stable softmax.
+- **Reproducibility:** Run seeded experiments and persist structured results.
+- **FastAPI integration:** Expose inference, benchmarking, and numerical
+  experiment functionality through APIs.
+
+## Technology stack
+
+Python · PyTorch · Hugging Face Transformers · NumPy · FastAPI · Pydantic ·
+Pytest · Ruff
+
+## Hardware approach
+
+Designed for CPU-first development. Optional acceleration and specialized
+inference backends are treated separately rather than assumed to be available
+on every machine.
+
+## Current status
+
+- **Phases 1–3:** Environment, architecture, dataset, and tokenization pipeline.
+- **Phase 4:** CPU-based Transformer inference and benchmarking.
+- **Phase 4.1:** Real tiny-GPT-2 inference and benchmark validation.
+- **Phase 5:** PyTorch numerical precision, matrix multiplication, stability,
+  and reproducibility experiments.
 
 ## Architecture
 
@@ -18,23 +49,23 @@ or produce performance results.
 app/
 ├── api/             FastAPI surfaces
 ├── core/            Settings, logging, errors, and shared schemas
-├── inference/       Backend contract, registry, and optional adapters
+├── inference/       Backend contract, registry, and CPU Transformers adapter
 ├── datasets/        Synthetic, JSONL, and opt-in WikiText-2 datasets
 ├── tokenization/    Offline and optional Hugging Face tokenization
 ├── transformer_lab/ Educational PyTorch implementations (future phase)
-├── numerical_lab/   NumPy, PyTorch, and JAX experiments (future phase)
-├── benchmarking/   Seeded input manifests; inference runner (future phase)
+├── numerical_lab/   CPU PyTorch precision, matrix, stability, and reproducibility experiments
+├── benchmarking/    Seeded manifests and repeated inference runner
 ├── system/          Runtime and hardware information
 └── dashboard/       Streamlit dashboard (future phase)
 ```
 
-The API exposes `GET /health`, `GET /backends`, `GET /system/info`, dataset
-discovery and loading, sample pagination, dataset/tokenization statistics,
-`POST /tokenize`, and seeded benchmark-input preparation. See
+The API exposes system, dataset, tokenization, model lifecycle, generation,
+inference-benchmark, and CPU numerical-experiment routes. See
 [docs/datasets-and-tokenization.md](./docs/datasets-and-tokenization.md) for
-routes and PowerShell examples. Dataset loading is explicit; listing WikiText-2
-does not download it. Optional inference backends are not registered until
-their adapters are implemented.
+dataset workflows, [docs/numerical-experiments.md](./docs/numerical-experiments.md)
+for Phase 5, and the generated OpenAPI page for all routes. Dataset and model
+loading are explicit; listing an optional source or starting the API does not
+download data or weights.
 
 ## Prerequisites
 
@@ -80,12 +111,23 @@ must not be assumed.
 ## Dependencies and optional integrations
 
 The base install includes NumPy, Pydantic, FastAPI, Uvicorn, Streamlit, and
-`.env` loading. Test and lint packages are in the `dev` extra. Install only
-optional ML packages needed for a specific experiment:
+`.env` loading. Test and lint packages are in the `dev` extra. For CPU inference
+on Windows, install a CPU-only PyTorch wheel in the project environment, then
+install the Transformers and optional process-metrics extras:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[transformers]"
-.\.venv\Scripts\python.exe -m pip install -e ".[pytorch]"
+.\.venv\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.6,<3"
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,transformers,system-metrics]"
+.\.venv\Scripts\python.exe scripts\check_torch_environment.py
+```
+
+The project also declares separate `pytorch` and `transformers` extras, which
+can be installed together with
+`.\.venv\Scripts\python.exe -m pip install -e ".[pytorch,transformers]"`.
+For Windows CPU development, prefer the explicit CPU-index command above.
+Install JAX separately only when running its numerical experiments:
+
+```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[jax]"
 ```
 
@@ -112,8 +154,9 @@ environment or `.env`:
 | `LLM_LAB_BENCHMARK_OUTPUT_DIR` | `benchmarks/results` | Local benchmark output location |
 | `LLM_LAB_DATA_DIR` | `data` | Local dataset and cache root |
 | `LLM_LAB_DATASET_MAX_SAMPLES` | `5000` | Dataset load bound |
-| `LLM_LAB_DATA_DIR` | `data` | Local JSONL and external dataset cache root |
-| `LLM_LAB_DATASET_MAX_SAMPLES` | `5000` | Maximum samples loaded from an external/local dataset |
+| `LLM_LAB_INFERENCE_MODEL_ID` | `sshleifer/tiny-gpt2` | Configured default model; not loaded automatically |
+| `LLM_LAB_INFERENCE_OFFLINE_MODE` | `true` | Prevent API-triggered network downloads |
+| `LLM_LAB_INFERENCE_MAX_NEW_TOKENS` | `256` | Maximum generation length enforced by the backend |
 
 Logs include timestamps and module names. Application code should not log
 complete prompts, credentials, or other sensitive values.
@@ -137,6 +180,92 @@ The default `simple` tokenizer is an offline baseline, not a model tokenizer.
 The optional Hugging Face adapter is cached-only unless a download is
 explicitly requested. Neither dataset loading nor benchmark manifest
 preparation runs a model or fabricates performance measurements.
+
+## PyTorch numerical experiments
+
+Phase 5 provides CPU-only float32/float64/float16/bfloat16 precision comparisons,
+matrix multiplication benchmarks, numerical-stability demonstrations, and
+seeded reproducibility checks. Each execution records the actual operation
+status and runtime metadata in unique JSON and CSV files under
+`benchmarks/results/numerical/`. Unsupported dtypes are recorded with their
+runtime error rather than replaced with another dtype. PyTorch remains an
+optional dependency; the API does not import it or run experiments at startup.
+
+Run all experiments on this CPU environment:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_precision_experiments.py --experiment all --seed 42 --warmups 2 --iterations 5 --matrix-sizes 64 256 512
+```
+
+The API exposes `GET /experiments`, `POST /experiments/run`, and
+`GET /experiments/results`. See
+[docs/numerical-experiments.md](./docs/numerical-experiments.md) for
+experiment definitions, measurement methodology, and the results from the
+latest explicit CPU run.
+
+## CPU model inference
+
+The first model is `sshleifer/tiny-gpt2`, a small educational model for testing
+the inference pipeline, not a production-quality assistant. PyTorch executes
+the model on CPU; Transformers loads the model and its matching tokenizer.
+Tokenization converts input text into model-specific token IDs, and
+autoregressive generation repeatedly predicts the next token from the prompt
+and tokens already generated.
+
+Model loading is explicit and cache-only by default:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\download_tiny_model.py
+.\.venv\Scripts\python.exe scripts\run_inference.py --prompt "Explain CPU inference briefly." --max-new-tokens 24
+```
+
+Running the download command explicitly requests the weights. Alternatively,
+pass `--allow-download` to `run_inference.py`. Model files use the configured
+Hugging Face cache (`LLM_LAB_MODEL_CACHE_DIR`, default
+`~/.cache/llm-inference-performance-lab/models`). No fallback model is loaded.
+The API defaults to offline mode; to permit a requested download, set
+`$env:LLM_LAB_INFERENCE_OFFLINE_MODE = "false"` and send
+`{"allow_download": true}` to `POST /inference/load`.
+
+Run a real repeated benchmark after the model is cached:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_transformers.py --samples 3 --max-new-tokens 16 --repetitions 3 --warmups 1
+```
+
+Results and the selected-input manifest are written beneath the configured
+benchmark output directory. Each result records the model revision when
+available, runtime versions, selected sample IDs, generation settings, and
+measured entries. Use the same dataset, seed, filters, and generation settings
+to reproduce input selection; timing will vary with machine load and software
+environment.
+
+`POST /inference/generate` accepts one prompt. `POST /inference/tokenize`
+uses the tokenizer belonging to the currently loaded model. The benchmark API
+uses samples from a dataset explicitly loaded through the dataset API. Model
+loading, dataset loading, and benchmark execution are separate operations.
+
+### Metric definitions and limitations
+
+- Model loading duration covers tokenizer and model loading; it is separate
+  from generation latency.
+- Tokenization latency is measured separately for a generation request.
+- Generation duration measures the `model.generate()` call, not tokenization
+  or model loading. Generated tokens per second is generated token count
+  divided by this duration; it is not prompt-plus-output throughput.
+- Warm-up iterations run before recorded measurements and are excluded from
+  benchmark statistics.
+- This implementation cannot accurately observe first-token emission from
+  `model.generate()`, so TTFT is returned as unavailable (`null`), not
+  estimated.
+- If optional `psutil` is installed, RSS and process CPU are sampled during
+  generation. RSS is whole-process memory, not model-only or incremental
+  memory. These values are unavailable when the dependency is missing.
+
+Automated tests use deterministic fake models and tokenizers to check control
+flow and persistence; their outputs are not inference measurements. Only
+executing the scripts or API with loaded model weights creates real measured
+results. The test suite does not download weights or run real inference.
 
 ## Run the API
 
@@ -163,13 +292,14 @@ across Python 3.10, 3.11, and 3.13.
 
 ## Hardware limitations
 
-The core project is CPU-compatible and does not assume CUDA or NVIDIA hardware.
+The inference backend explicitly selects CPU and does not initialize CUDA or
+assume NVIDIA hardware. It does not claim AMD GPU acceleration or ROCm support.
 The inspected machine reports AMD Radeon integrated graphics and 15.3 GiB RAM;
 the reported adapter memory is not a reliable estimate of total shared or
-usable GPU memory. The initial system endpoint reports OS, Python, and CPU
-count. It leaves memory and GPU inventory unset rather than presenting
-unverified measurements. Future backend adapters must check actual runtime
-support and report unavailable capabilities explicitly.
+usable GPU memory. The system endpoint reports OS, Python, and CPU count; the
+backend reports CPU as its execution device. The default generation cap is
+conservative and configurable. Only one model can be loaded by a backend
+instance; unload it to release references before loading another.
 
 For Linux/WSL deployment, use a separate environment and follow the current
 installation instructions for the chosen inference framework and driver
@@ -178,15 +308,13 @@ stack. WSL does not by itself guarantee AMD GPU support for a given framework.
 ## Development roadmap
 
 1. Environment and project scaffolding
-2. Dataset management, tokenization, and benchmark input preparation (this phase)
-3. Educational transformer fundamentals
-4. CPU-first Hugging Face inference
-5. Optional llama.cpp integration
-6. Optional vLLM and SGLang deployment adapters
-7. NumPy, PyTorch, and JAX numerical experiments
-8. Reproducible inference benchmarking engine
-9. Streamlit dashboard and expanded API surfaces
-10. Expanded CI and benchmark methodology documentation
+2. Dataset management, tokenization, and benchmark input preparation
+3. CPU-first Hugging Face Transformers inference and repeated benchmarking
+4. Educational transformer fundamentals
+5. PyTorch numerical experiments and precision analysis
+6. Optional llama.cpp integration
+7. Optional vLLM and SGLang deployment adapters
+8. NumPy/JAX numerical experiments and dashboard analysis
 
-This repository contains no benchmark results yet. Results will be recorded
-only after actual executions with their settings and environment metadata.
+Benchmark and numerical experiment outputs are created only after actual
+execution and remain excluded from Git.

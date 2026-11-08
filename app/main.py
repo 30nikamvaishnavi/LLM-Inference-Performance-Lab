@@ -12,12 +12,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
 from app.api.routes.datasets import router as datasets_router
+from app.api.routes.experiments import router as experiments_router
+from app.api.routes.inference import router as inference_router
 from app.api.routes.tokenization import router as tokenization_router
 from app.core.config import Settings
 from app.core.exceptions import ApplicationError
 from app.core.logging_config import configure_logging
 from app.core.schemas import BackendInfo, SystemInfo
 from app.datasets.registry import DatasetRegistry
+from app.inference.backends.transformers_backend import TransformersBackend
 from app.inference.registry import BackendRegistry
 from app.tokenization.registry import TokenizerRegistry
 
@@ -28,6 +31,7 @@ def create_app(
     backend_registry: BackendRegistry | None = None,
     dataset_registry: DatasetRegistry | None = None,
     tokenizer_registry: TokenizerRegistry | None = None,
+    inference_backend: TransformersBackend | None = None,
 ) -> FastAPI:
     """Create the API application, optionally with an injected backend registry."""
     settings = Settings()
@@ -43,13 +47,26 @@ def create_app(
         debug=settings.debug,
     )
     api.state.backend_registry = backend_registry or BackendRegistry()
+    existing_transformers_backend = api.state.backend_registry.get_backend("transformers")
+    if existing_transformers_backend is not None and not isinstance(
+        existing_transformers_backend, TransformersBackend
+    ):
+        raise ValueError("The registered 'transformers' backend must be a TransformersBackend.")
+    transformers_backend = (
+        inference_backend or existing_transformers_backend or TransformersBackend(settings)
+    )
+    if backend_registry is None and existing_transformers_backend is None:
+        api.state.backend_registry.register(transformers_backend)
     api.state.dataset_registry = dataset_registry or DatasetRegistry(
         settings.data_dir,
         max_samples=settings.dataset_max_samples,
     )
     api.state.tokenizer_registry = tokenizer_registry or TokenizerRegistry()
     api.state.settings = settings
+    api.state.transformers_backend = transformers_backend
     api.include_router(datasets_router)
+    api.include_router(experiments_router)
+    api.include_router(inference_router)
     api.include_router(tokenization_router)
 
     @api.exception_handler(ApplicationError)
